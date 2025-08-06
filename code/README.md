@@ -103,6 +103,6 @@ Built using the [Europe PMC RESTful API](https://europepmc.org/RestfulWebService
 
 ## Contact
 
-For feedback or issues, please open an issue or contact Qianhui Wan.
+For feedback or issues, please open an issue or contact Qianhui Wan (qwan@coh.org).
 
 
