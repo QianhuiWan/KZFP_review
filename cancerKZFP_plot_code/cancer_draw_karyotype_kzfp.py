@@ -3,14 +3,19 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from bisect import bisect_left
 
-# ===== 配置 =====
-CYTO_BED = "cytoBand.txt"      # UCSC cytoBand (解压后的 txt)
-CHROM_SIZES = "chrom.sizes"    # 与 cytoband 同版本（hg38/hg19）
-KZFP_BED = "KZFPs.bed"         # 你的 KZFP 座标
-OUTPUT = "karyotype_KZFP.svg"  # 输出
-LABEL_MODE = "cytoband"        # 'cytoband' | 'genomic' | 'both'
+# ===== config =====
+## UCSC cytoBand (need to download first)
+CYTO_BED = "cytoBand.txt"   
+## same genome version as cytoband（e.g.hg38）   
+CHROM_SIZES = "chrom.sizes"   
+## KZFP location at hg38 genome
+KZFP_BED = "KZFPs.bed"     
+## output path + output file name    
+OUTPUT = "karyotype_KZFP.svg"
+## 'cytoband' | 'genomic' | 'both'
+LABEL_MODE = "cytoband"        
 
-# 展示顺序
+# chr order
 CHROMS = [f"chr{i}" for i in range(1,23)] + ["chrX","chrY"]
 
 # ===== 读取数据 =====
