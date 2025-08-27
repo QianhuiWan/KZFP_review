@@ -1,3 +1,5 @@
+# "get karyotype_KZFP plot"
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -5,20 +7,20 @@ from bisect import bisect_left
 
 # ===== config =====
 ## UCSC cytoBand (need to download first)
-CYTO_BED = "cytoBand.txt"   
+CYTO_BED = "~/githubRepo/KZFP_review/input_data/hg38_cytoBand.txt"   
 ## same genome version as cytoband（e.g.hg38）   
-CHROM_SIZES = "chrom.sizes"   
+CHROM_SIZES = "~/githubRepo/KZFP_review/input_data/filtered_hg38_p14.chrom.sizes"   
 ## KZFP location at hg38 genome
-KZFP_BED = "KZFPs.bed"     
+KZFP_BED = "~/githubRepo/KZFP_review/input_data/kzfps_hg38_cancer_geneCoordinates.bed"     
 ## output path + output file name    
-OUTPUT = "karyotype_KZFP.svg"
+OUTPUT = "~/githubRepo/KZFP_review/outputs/cancer_KZFPs.pdf"
 ## 'cytoband' | 'genomic' | 'both'
 LABEL_MODE = "cytoband"        
 
 # chr order
 CHROMS = [f"chr{i}" for i in range(1,23)] + ["chrX","chrY"]
 
-# ===== 读取数据 =====
+# ===== read in data =====
 cyto = pd.read_csv(
     CYTO_BED, sep=r"\s+", header=None,
     names=["chrom","start","end","band","stain"]
@@ -31,7 +33,8 @@ sizes = pd.read_csv(
 sizes = sizes[sizes["chrom"].isin(CHROMS)]
 chrom_size = dict(sizes.values)
 
-# 建 cytoband 快速索引
+
+# create cytoband index
 cyto_idx = {}
 for c, sub in cyto.groupby("chrom", sort=False):
     sub = sub.sort_values("start").reset_index(drop=True)
@@ -40,6 +43,7 @@ for c, sub in cyto.groupby("chrom", sort=False):
         "ends":   sub["end"].tolist(),
         "bands":  sub["band"].tolist()
     }
+
 
 def pos_to_cytoband(chrom, pos):
     if chrom not in cyto_idx: return None
@@ -59,7 +63,7 @@ def label_for(chrom, pos):
         return cyt
     return f"{cyt} ({chrom}:{pos/1e6:.1f}Mb)"
 
-# 读 KZFP
+# read in KZFP
 kzfp = pd.read_csv(
     KZFP_BED, sep=r"\s+", header=None,
     names=["chrom","start","end","name"]
@@ -67,8 +71,8 @@ kzfp = pd.read_csv(
 kzfp = kzfp[kzfp["chrom"].isin(CHROMS)].copy()
 kzfp["mid"] = ((kzfp["start"] + kzfp["end"])//2).astype(int)
 
-# ===== 画图画核型（简洁版）=====
-# 布局参数（列*行）
+# ===== plotting（simple version）=====
+# parameters（column * row）
 cols = 6
 rows = (len(CHROMS) + cols - 1)//cols
 fig_w, fig_h = 16, 12
@@ -76,41 +80,41 @@ plt.figure(figsize=(fig_w, fig_h))
 ax = plt.gca()
 ax.axis("off")
 
-# 每条染色体矩形的宽与行距
-W = 0.55          # 染色体条宽
-XGAP = 2.2        # 列间距
-YGAP = 1.0        # 行间距
+# chromosome display
+W = 0.55          # chr width
+XGAP = 2.2        # column gaps
+YGAP = 1.0        # row gaps
 top = rows*YGAP + 1.0
 
-# 保存每条染色体左上角坐标，供映射
+# save chr axis position on plot for later use 
 chrom_box = {}
 
 for i, chrom in enumerate(CHROMS):
     col = i // rows
     row = i % rows
     x0 = col*XGAP
-    y0 = top - row*YGAP - 0.1  # 让最上侧有留白
+    y0 = top - row*YGAP - 0.1  # white space up
     chrom_box[chrom] = (x0, y0)
 
-    # 该染色体总长
+    # chr length 
     L = chrom_size[chrom]
 
-    # 每个band画成竖直条（不设色，保持简洁：默认边框+透明填充）
+    # band to vertical lines
     sub = cyto[cyto["chrom"]==chrom].sort_values("start")
     for _, r in sub.iterrows():
         s, e = r["start"], r["end"]
         frac_s, frac_e = s/L, e/L
-        # 用单位高度=1 表示整条染色体长度
+        # unit=1, chr length
         rect = patches.Rectangle((x0, y0+frac_s), W, (frac_e-frac_s),
                                  fill=False, linewidth=0.6)
         ax.add_patch(rect)
 
-    # 染色体编号
+    # chr number
     ax.text(x0 + W + 0.15, y0 + 0.5, chrom.replace("chr",""),
             fontsize=9, va="center")
 
-# ===== 标 KZFP =====
-# 为了避免大面积重叠：按染色体分组，逐条竖向微错位
+# ===== label KZFP =====
+# avoid overlapping
 from collections import defaultdict
 y_taken = defaultdict(list)  # chrom -> used y positions
 
@@ -141,3 +145,7 @@ for _, g in kzfp.sort_values(["chrom","mid","name"]).iterrows():
 plt.tight_layout()
 plt.savefig(OUTPUT, dpi=300)
 print(f"Saved: {OUTPUT}")
+
+
+
+

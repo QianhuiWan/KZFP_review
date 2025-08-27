@@ -5,4 +5,4 @@ curl http://hgdownload.cse.ucsc.edu/goldenpath/hg38/database/cytoBand.txt.gz -o 
 
 pigz -dk hg38_cytoBand.txt.gz
 
-curl 
+
