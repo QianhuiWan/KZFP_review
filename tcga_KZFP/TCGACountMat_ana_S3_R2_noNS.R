@@ -60,7 +60,7 @@ de_KZFP_distribution <- topTable_kzfps_ads_mat_df %>%
   
 ggsave(filename = "de_KZFP_distribution.pdf", 
        plot = de_KZFP_distribution, device = "pdf", 
-       path = "/home/qwan/githubRepo/KZFP_review/tcga_KZFP/", 
+       path = "/home/qwan/githubRepo/KZFP_review/outputs/", 
        width = 12, height = 10, units = "cm")
 
 
@@ -134,6 +134,7 @@ col_annotation <- HeatmapAnnotation(
 library(circlize)
 color_scale <- colorRamp2(c(-5, 0, 5), c("blue", "white", "red"))
 
+## test different clustering method
 # register_DendSer()
 # get_seriation_method("dist", "DendSer")
 methods <- list_seriation_methods()
@@ -196,7 +197,7 @@ p <- Heatmap(
 
 # Convert to ggplot object
 ggplot_heatmap <- as.ggplot(p)
-ggsave(paste0("/home/qwan/githubRepo/KZFP_review/tcga_KZFP/", 
+ggsave(paste0("/home/qwan/githubRepo/KZFP_review/outputs/", 
               "/panCancer_up_kzfps_FCabove1_FDR05_TCGAds_MDS.pdf"), 
        plot = ggplot_heatmap,
        width = 20, height = 20, units = "cm", limitsize = FALSE)
@@ -204,6 +205,7 @@ ggsave(paste0("/home/qwan/githubRepo/KZFP_review/tcga_KZFP/",
 
 
 # for down regulated pan-cancer KZFPs
+## test different clustering method
 for (method in methods$dist[c(1, 5:8, 11:length(methods$dist))]) {
 # for (method in methods$dist[c(5:8,11:length(methods$dist))]) {
   # for (method in methods$dist[c(1)]) {
@@ -265,7 +267,7 @@ p <- Heatmap(
 
 # Convert to ggplot object
 ggplot_heatmap <- as.ggplot(p)
-ggsave(paste0("/home/qwan/githubRepo/KZFP_review/tcga_KZFP/", 
+ggsave(paste0("/home/qwan/githubRepo/KZFP_review/outputs/", 
               "/panCancer_down_kzfps_FCabove1_FDR05_TCGAds_MDS.pdf"), 
        plot = ggplot_heatmap,
        width = 20, height = 30, units = "cm", limitsize = FALSE)
