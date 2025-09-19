@@ -9,3 +9,8 @@
     
 - step 3: visulization
     - ~/githubRepo/KZFP_review/tcga_KZFP/TCGACountMat_ana_S3_R2_noNS.R
+
+
+# steps for muation enrichment analysis
+
+- step 1: get mutation data and CNV data

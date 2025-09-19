@@ -1,4 +1,5 @@
-# -------- 依赖安装 --------
+
+# packages
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 for (p in c("TCGAbiolinks", "dplyr", "tidyr", "stringr", "purrr", "tibble", "readr", "SummarizedExperiment")) {
   if (!requireNamespace(p, quietly = TRUE)) BiocManager::install(p, ask = FALSE, update = FALSE)
@@ -7,25 +8,25 @@ library(TCGAbiolinks)
 library(dplyr); library(tidyr); library(stringr); library(purrr); library(tibble); library(readr)
 library(SummarizedExperiment)
 
-# -------- 参数：IFN 通路基因集合（可按需增减）--------
+# -------- IFN genes --------
 ifn_genes <- unique(c(
-  # 受体
+  # receptors
   "IFNAR1","IFNAR2","IFNGR1","IFNGR2","IFNLR1","IL10RB",
   # JAK-STAT
   "JAK1","JAK2","TYK2","STAT1","STAT2",
-  # 转录/调控
+  # TFs
   "IRF1","IRF3","IRF7","IRF9",
-  # I 型 IFN 基因簇（9p21.3，示例）
+  # Tyep I IFN genes
   paste0("IFNA", 1:14), "IFNB1"
 ))
 
-# 非同义突变枚举（MAF 的 Variant_Classification）
+# nonsynonymous mutations（MAF Variant_Classification）
 nonsyn_classes <- c(
   "Missense_Mutation","Nonsense_Mutation","Frame_Shift_Del","Frame_Shift_Ins",
   "In_Frame_Del","In_Frame_Ins","Splice_Site","Translation_Start_Site","Nonstop_Mutation"
 )
 
-# -------- 辅助函数：拉取 MAF（mutect2）--------
+# -------- function：to get MAF（mutect2）--------
 fetch_maf <- function(project){
   message("Downloading MAF for: ", project)
   df <- tryCatch({
@@ -44,10 +45,10 @@ fetch_maf <- function(project){
   df
 }
 
-# -------- 辅助函数：拉取基因水平 CNA（GISTIC2 阈值）--------
+# -------- function：to get gene expression CNA（GISTIC2 cutoff）--------
 fetch_cna_gene <- function(project){
   message("Downloading gene-level CNA for: ", project)
-  # 尝试常见的 data.type 名称
+  # normal used data.type names
   data_type_candidates <- c("Gene Level Copy Number Scores", "Gene Level Copy Number")
   for (dt in data_type_candidates){
     q <- tryCatch({
@@ -61,7 +62,7 @@ fetch_cna_gene <- function(project){
       se <- tryCatch({ GDCprepare(q) }, error = function(e) NULL)
       if (is.null(se)) next
 
-      # 尝试从 SummarizedExperiment 里读出矩阵
+      # get marix from SummarizedExperiment 
       # 常见结构：行是基因（或含基因列名），列是样本；数值为 -2..+2
       assay_mat <- tryCatch(assay(se), error = function(e) NULL)
       if (!is.null(assay_mat)){
@@ -69,16 +70,15 @@ fetch_cna_gene <- function(project){
           tibble::rownames_to_column("Hugo_Symbol") %>%
           pivot_longer(-Hugo_Symbol, names_to = "sample_id", values_to = "CNA") %>%
           mutate(project = project)
-        # 标准化 sample_id 到前 16 位（TCGA-..-..-..）
+        # get sample_id for 16 letters（TCGA-..-..-..）
         cna_df$sample_id <- substr(cna_df$sample_id, 1, 16)
         return(cna_df)
       }
 
       # 如果 assay 为空，试试 se@metadata 或 colData/rowData 组合（较少见）
-      # 这里简单返回空，避免过多分支
     }
   }
-  message("  ! Gene-level CNA not found for ", project)
+  message(" ! Gene-level CNA not found for ", project)
   tibble(project = character(), sample_id = character(), Hugo_Symbol = character(), CNA = numeric())
 }
 
