@@ -1,4 +1,6 @@
 
+# CNA: copy number alteration
+
 # packages
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 for (p in c("TCGAbiolinks", "dplyr", "tidyr", "stringr", "purrr", "tibble", "readr", "SummarizedExperiment")) {
@@ -61,9 +63,8 @@ fetch_cna_gene <- function(project){
       if (!ok) next
       se <- tryCatch({ GDCprepare(q) }, error = function(e) NULL)
       if (is.null(se)) next
-
-      # get marix from SummarizedExperiment 
-      # 常见结构：行是基因（或含基因列名），列是样本；数值为 -2..+2
+      # get marix from SummarizedExperiment
+      # structure：row=gene name, col=sample；values= -2..+2
       assay_mat <- tryCatch(assay(se), error = function(e) NULL)
       if (!is.null(assay_mat)){
         cna_df <- as.data.frame(assay_mat) %>%
@@ -74,7 +75,6 @@ fetch_cna_gene <- function(project){
         cna_df$sample_id <- substr(cna_df$sample_id, 1, 16)
         return(cna_df)
       }
-
       # 如果 assay 为空，试试 se@metadata 或 colData/rowData 组合（较少见）
     }
   }
@@ -91,15 +91,15 @@ all_proj <- getGDCprojects() %>%
 
 message("Total TCGA projects: ", length(all_proj))
 
-# 若只想测试少量项目，解除下一行注释：
+# test use few datasets：
 # all_proj <- c("TCGA-BRCA","TCGA-LUAD","TCGA-LAML")
 
-# -------- 下载合并 MAF 与 CNA --------
+# -------- download and merge MAF and CNA --------
 maf_all <- map_dfr(all_proj, fetch_maf)
 cna_all <- map_dfr(all_proj, fetch_cna_gene)
 
-# -------- 生成样本状态标签 --------
-# 1) TP53 非同义突变
+# -------- get sample status tags --------
+# 1) TP53 nonsynonymous mutations or CNA 
 tp53_mut <- maf_all %>%
   filter(Hugo_Symbol == "TP53", Variant_Classification %in% nonsyn_classes) %>%
   distinct(project, sample_id) %>%
