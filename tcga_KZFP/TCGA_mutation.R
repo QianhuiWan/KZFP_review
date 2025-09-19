@@ -1,11 +1,9 @@
 
 # packages
-if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-for (p in c("TCGAbiolinks", "dplyr", "tidyr", "stringr", "purrr", "tibble", "readr", "SummarizedExperiment")) {
-  if (!requireNamespace(p, quietly = TRUE)) BiocManager::install(p, ask = FALSE, update = FALSE)
-}
+
 library(TCGAbiolinks)
-library(dplyr); library(tidyr); library(stringr); library(purrr); library(tibble); library(readr)
+library(dplyr); library(tidyr); library(stringr); library(purrr); library(tibble); 
+library(readr)
 library(SummarizedExperiment)
 
 # -------- IFN genes --------
