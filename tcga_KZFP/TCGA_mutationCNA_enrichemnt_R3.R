@@ -31,6 +31,7 @@ write_tsv(group_df, "~/githubRepo/KZFP_review/outputs/cancerType_groups.tsv")
 low_name  <- unique(group_df$group)[1]
 high_name <- unique(group_df$group)[2]
 
+
 # ========= B. Gene sets =========
 # IFN pathway genes can be provided via 'ifn_genes.txt' (one gene per line).
 # If that file doesn't exist, fall back to a default list below.
@@ -78,6 +79,8 @@ nonsyn <- c("Frame_Shift_Del","Frame_Shift_Ins","In_Frame_Del","In_Frame_Ins",
 
 # Normalize TCGA barcodes to first 15 chars (sample-level)
 norm_barcode <- function(x) substr(x, 1, 15)
+
+
 
 # ========= C. Mutation frequencies (from TCGAbiolinks MAF) =========
 # For each TCGA project:
@@ -131,6 +134,7 @@ mut_freq <- mut_freq %>% left_join(group_df, by = c("cohort"="cancerType"))
 
 write_tsv(mut_freq, file = "~/githubRepo/KZFP_review/outputs/mut_freq_sampleLevel_Num.tsv")
 
+
 # ========= D. CNV frequencies =========
 # We provide a precise, gene-set–aware CNV pipeline (segment → gene overlap),
 # and also keep a broad “ANY-segment” helper for sensitivity analysis.
@@ -161,6 +165,7 @@ build_gene_coords <- function(genes, genome_version = "GRCh38"){
     symbol   = toupper(tbl$hgnc_symbol)
   )
 }
+
 
 # --- D1) Segment→gene overlap + frequency computation (core) ---
 # Inputs:
@@ -259,7 +264,7 @@ get_cnv_seg_freq_any <- function(project, loss_thr=-0.3, amp_thr=0.3){
 
 # --- D3) Main loop: fetch CNV segments per project and compute TP53/IFN CNV frequencies ---
 # 1) Build coordinates once
-tp53_coords <- build_gene_coords("TP53")
+tp53_coords <- build_gene_coords(tp53_genes)
 ifn_coords  <- build_gene_coords(ifn_genes)
 
 # 2) Helper to fetch a project's CNV segments
@@ -268,13 +273,13 @@ get_project_cnv_segments <- function(project){
                                   data.category = "Copy Number Variation",
                                   data.type = "Copy Number Segment")
   tryCatch({
-    TCGAbiolinks::GDCdownload(q.cnv, method="api", files.per.chunk=50)
+    TCGAbiolinks::GDCdownload(q.cnv, method="api", files.per.chunk=40)
     TCGAbiolinks::GDCprepare(q.cnv)
   }, error=function(e) NULL)
 }
 
 # Compute precise (gene-set) CNV frequencies
-cnv_precise_list <- lapply(unique(group_df$cohort), function(prj){
+cnv_precise_list <- lapply(unique(group_df$cancerType), function(prj){
   cnv_seg <- get_project_cnv_segments(prj)
   if (is.null(cnv_seg) || nrow(cnv_seg)==0) {
     # Return empty rows with proper column names if project has no CNV
@@ -285,7 +290,7 @@ cnv_precise_list <- lapply(unique(group_df$cohort), function(prj){
         dplyr::rename(ifn_loss_freq=loss_freq,  ifn_amp_freq=amp_freq)
     ))
   }
-  tp53 <- get_cnv_freq_for_genes(prj, cnv_seg, tp53_coords, gene_set = "TP53")
+  tp53 <- get_cnv_freq_for_genes(prj, cnv_seg, tp53_coords, gene_set = tp53_genes)
   ifn  <- get_cnv_freq_for_genes(prj, cnv_seg, ifn_coords,  gene_set = ifn_genes)
 
   tp53 <- tp53 %>% dplyr::rename(tp53_loss_freq = loss_freq, tp53_amp_freq = amp_freq) %>% dplyr::rename(n_tp53 = n)
@@ -296,9 +301,13 @@ cnv_precise_list <- lapply(unique(group_df$cohort), function(prj){
 
 cnv_precise <- dplyr::bind_rows(cnv_precise_list)
 
+cnv_precise <- cnv_precise %>% left_join(group_df, by = c("cohort"="cancerType"))
+
+write_tsv(cnv_precise, file = "~/githubRepo/KZFP_review/outputs/cnv_freq_sampleLevel_Num.tsv")
+
 # Optional: also compute the broad ANY-segment frequencies as a control
-cnv_any_list <- lapply(unique(group_df$cohort), get_cnv_seg_freq_any)
-cnv_any <- dplyr::bind_rows(cnv_any_list)
+# cnv_any_list <- lapply(unique(group_df$cancerType), get_cnv_seg_freq_any)
+# cnv_any <- dplyr::bind_rows(cnv_any_list)
 
 # ========= E. Merge results and run enrichment tests =========
 # Combine: your grouping + mutation frequencies + precise CNV (and optional ANY CNV)
