@@ -11,8 +11,21 @@ library(msigdbr)
 # ========= A. Read your cancer-type grouping =========
 # Expect a 2-column TSV: cohort, group
 # Example rows: "TCGA-BRCA  KZFP_low", "TCGA-LUAD  KZFP_high"
-group_df <- readr::read_tsv("cancer_groups.tsv") %>%
-  mutate(group = as.character(group))
+group_df <- tibble(
+  cancerType = c(
+  "TCGA-CESC","TCGA-UCEC","TCGA-READ","TCGA-COAD","TCGA-ESCA",
+  "TCGA-HNSC","TCGA-LUSC","TCGA-KIRP","TCGA-KIRC","TCGA-BLCA",
+  "TCGA-STAD","TCGA-BRCA","TCGA-GBM","TCGA-KICH","TCGA-PRAD",
+  "TCGA-LUAD","TCGA-PAAD","TCGA-CHOL","TCGA-LIHC","TCGA-SKCM",
+  "TCGA-SARC","TCGA-THCA","TCGA-PCPG"),
+  group = c(rep("KZFP_low", 15), "KZFP_high", "KZFP_noChange",
+            rep("KZFP_high", 2), rep("KZFP_noChange", 4))
+)
+
+write_tsv(group_df, "~/githubRepo/KZFP_review/outputs/cancerType_groups.tsv")
+  
+# group_df <- readr::read_tsv("cancerType_groups.tsv") %>%
+#   mutate(group = as.character(group))
 
 # Optional: explicitly set the two group names (or keep as-is)
 low_name  <- unique(group_df$group)[1]
@@ -26,10 +39,37 @@ if (file.exists(ifn_genes_file)) {
   ifn_genes <- toupper(readr::read_lines(ifn_genes_file))
 } else {
   ifn_genes <- toupper(c(
-    "IFNAR1","IFNAR2","IFNGR1","IFNGR2","IFNLR1","IL10RB",
-    "JAK1","JAK2","TYK2","STAT1","STAT2","IRF9","IRF1","IRF7","IRF8"
+    # receptors
+    "IFNAR1","IFNAR2",            # type I
+    "IFNGR1","IFNGR2",            # type II
+    "IFNLR1","IL10RB",            # type III
+    # kinases / TFs
+    "JAK1","JAK2","TYK2",
+    "STAT1","STAT2","STAT3",
+    "IRF9","IRF1","IRF7","IRF8",
+    # negative regulators (optional, useful context)
+    "SOCS1","SOCS3"
   ))
 }
+
+ifn_isg <- c(
+  "ISG15","MX1","MX2","OAS1","OAS2","OAS3","OASL",
+  "IFI6","IFI27","IFI44","IFI44L","IFIT1","IFIT2","IFIT3",
+  "RSAD2","CMPK2","XAF1",
+  "DDX58","IFIH1","IRF7","HERC5","BST2","TRIM22"
+)
+
+
+tp53_genes_file <- "tp53_genes.txt"
+if (file.exists(tp53_genes_file)) {
+  tp53_genes <- toupper(readr::read_lines(tp53_genes_file))
+} else {
+  tp53_genes <- toupper(c(
+    "TP53","MDM2","MDM4",
+    "CDKN1A","GADD45A","RRM2B","ZMAT3","DDB2","BTG2","CCNG1","PPM1D",
+    "BAX","BBC3","PMAIP1","FAS","PERP","SFN","SESN1","SESN2","TP53I3","TIGAR"))
+}
+
 
 # Non-synonymous mutation classes (to filter MAF)
 nonsyn <- c("Frame_Shift_Del","Frame_Shift_Ins","In_Frame_Del","In_Frame_Ins",
@@ -48,9 +88,16 @@ calc_mut_freq_one <- function(project){
   message("Processing MAF for: ", project)
   tumor <- sub("^TCGA-", "", project)
 
-  maf_df <- tryCatch(GDCquery_Maf(tumor = tumor, pipelines = "mutect2"),
-                     error=function(e) NULL)
+  q <- tryCatch(GDCquery(
+    project        = project,
+    data.category  = "Simple Nucleotide Variation",
+    data.type      = "Masked Somatic Mutation",
+    workflow.type  = "Aliquot Ensemble Somatic Variant Merging and Masking"
+  ), error=function(e) NULL)
   if (is.null(maf_df) || nrow(maf_df)==0) return(NULL)
+  # download maf data and load in here:
+  GDCdownload(q, method = "api", files.per.chunk = 20)
+  maf_df <- GDCprepare(q)
 
   maf_ns <- maf_df %>%
     filter(Variant_Classification %in% nonsyn) %>%
@@ -58,8 +105,8 @@ calc_mut_freq_one <- function(project){
            barcode = norm_barcode(Tumor_Sample_Barcode))
   if (nrow(maf_ns)==0) return(NULL)
 
-  # TP53 carriers
-  tp53_bar <- maf_ns %>% filter(Hugo_Symbol=="TP53") %>% distinct(barcode)
+  # TP53 gene carriers
+  tp53_bar <- maf_ns %>% filter(Hugo_Symbol %in% tp53_genes) %>% distinct(barcode)
   # Any IFN-gene carriers
   ifn_bar  <- maf_ns %>% filter(Hugo_Symbol %in% ifn_genes) %>% distinct(barcode)
 
@@ -77,8 +124,12 @@ calc_mut_freq_one <- function(project){
 }
 
 # Run for all cohorts listed in your group file
-mut_list <- lapply(unique(group_df$cohort), calc_mut_freq_one)
+mut_list <- lapply(unique(group_df$cancerType), calc_mut_freq_one)
 mut_freq <- bind_rows(mut_list)
+
+mut_freq <- mut_freq %>% left_join(group_df, by = c("cohort"="cancerType"))
+
+write_tsv(mut_freq, file = "~/githubRepo/KZFP_review/outputs/mut_freq_sampleLevel_Num.tsv")
 
 # ========= D. CNV frequencies =========
 # We provide a precise, gene-set–aware CNV pipeline (segment → gene overlap),
