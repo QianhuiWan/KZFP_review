@@ -14,3 +14,4 @@
 # steps for muation enrichment analysis
 
 - step 1: get mutation data and CNV data
+~/githubRepo/KZFP_review/tcga_KZFP/TCGA_mutationCNA_enrichemnt_R3.R

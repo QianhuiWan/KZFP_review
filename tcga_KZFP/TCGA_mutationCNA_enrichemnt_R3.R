@@ -356,6 +356,7 @@ res_cnv <- tibble(metric = targets_cnv) %>%
   ungroup() %>% mutate(p_adj = p.adjust(p, method="BH"))
 readr::write_tsv(res_cnv, "enrichment_results_cnv.tsv")
 
+
 # ========= F. Optional: pathway-level mutation enrichment (Hallmark as example) =========
 # For each pathway, compute per-cancer-type mutation frequency (any gene in the pathway),
 # then test enrichment across your two cancer-type groups.
@@ -400,7 +401,7 @@ test_pathways_mut <- function(){
         if (nrow(tbl)<2) NA_real_ else {
           m <- as.matrix(tbl[,c("pos","neg")]); rownames(m) <- tbl$group
           if (!all(c(low_name, high_name) %in% rownames(m))) NA_real_
-          else fisher.test(m[c(low_name, high_name],), alternative="greater")$p.value
+          else fisher.test(m[c(low_name, high_name),], alternative="greater")$p.value
         }
       },
       .groups="drop"
