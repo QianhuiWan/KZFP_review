@@ -132,7 +132,7 @@ mut_freq <- bind_rows(mut_list)
 
 mut_freq <- mut_freq %>% left_join(group_df, by = c("cohort"="cancerType"))
 
-write_tsv(mut_freq, file = "~/githubRepo/KZFP_review/outputs/mut_freq_sampleLevel_Num.tsv")
+write_tsv(mut_freq, file = "~/githubRepo/KZFP_review/outputs/mut_freq_Num_sampleLevel.tsv")
 
 
 # ========= D. CNV frequencies =========
@@ -303,20 +303,30 @@ cnv_precise <- dplyr::bind_rows(cnv_precise_list)
 
 cnv_precise <- cnv_precise %>% left_join(group_df, by = c("cohort"="cancerType"))
 
-write_tsv(cnv_precise, file = "~/githubRepo/KZFP_review/outputs/cnv_freq_sampleLevel_Num.tsv")
+write_tsv(cnv_precise, file = "~/githubRepo/KZFP_review/outputs/cnv_freq_Num_sampleLevel.tsv")
 
 # Optional: also compute the broad ANY-segment frequencies as a control
 # cnv_any_list <- lapply(unique(group_df$cancerType), get_cnv_seg_freq_any)
 # cnv_any <- dplyr::bind_rows(cnv_any_list)
 
 # ========= E. Merge results and run enrichment tests =========
+mut_freq <- read_tsv("~/githubRepo/KZFP_review/outputs/mut_freq_Num_sampleLevel.tsv")
+
 # Combine: your grouping + mutation frequencies + precise CNV (and optional ANY CNV)
 freq_by_cancer <- group_df %>%
-  left_join(mut_freq,    by="cohort") %>%   # mutation-level frequencies
-  left_join(cnv_precise, by="cohort") %>%   # TP53/IFN gene-set CNV frequencies
-  left_join(cnv_any,     by="cohort")       # optional ANY CNV (sensitivity analysis)
+  dplyr::mutate(cohort = cancerType) %>% 
+  dplyr::select(-group) %>% 
+  # mutation-level frequencies
+  left_join(mut_freq,    by="cohort") %>%  
+  dplyr::select(-group) %>% 
+  # TP53/IFN gene-set CNV frequencies
+  left_join(cnv_precise, by="cohort") %>% 
+  dplyr::mutate(group = str_replace_all(group, "KZFP_noChange", "KZFP_high"))
+  # optional ANY CNV (sensitivity analysis)
+  # left_join(cnv_any,     by="cohort")       
 
-readr::write_tsv(freq_by_cancer, "freq_by_cancer.tsv")
+readr::write_tsv(freq_by_cancer, "~/githubRepo/KZFP_review/outputs/mut_cnv_freq_by_cancerTypes.tsv")
+
 
 # One-sided Fisher on cancer-type–level frequencies:
 # Convert frequencies back to counts via round(freq * n) and compare group A vs B.
@@ -328,7 +338,7 @@ fisher_one_sided <- function(tbl, col_freq, alt = "greater"){
   m <- as.matrix(x[,c("pos","neg")])
   rownames(m) <- x$group
   if (!all(c(low_name, high_name) %in% rownames(m))) return(NA_real_)
-  fisher.test(m[c(low_name, high_name], ), alternative = alt)$p.value
+  fisher.test(m[c(low_name, high_name), ], alternative = alt)$p.value
 }
 
 # Targets for testing:
