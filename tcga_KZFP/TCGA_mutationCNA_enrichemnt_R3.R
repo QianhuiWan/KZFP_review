@@ -327,6 +327,7 @@ freq_by_cancer <- group_df %>%
 
 readr::write_tsv(freq_by_cancer, "~/githubRepo/KZFP_review/outputs/mut_cnv_freq_by_cancerTypes.tsv")
 
+freq_by_cancer <- read_tsv("~/githubRepo/KZFP_review/outputs/mut_cnv_freq_by_cancerTypes.tsv")
 
 # One-sided Fisher on cancer-type–level frequencies:
 # Convert frequencies back to counts via round(freq * n) and compare group A vs B.
