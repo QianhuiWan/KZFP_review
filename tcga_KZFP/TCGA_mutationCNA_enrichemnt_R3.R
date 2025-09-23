@@ -7,6 +7,10 @@ library(tidyverse)
 library(data.table)
 library(TCGAbiolinks)
 library(msigdbr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+library(scales)
 
 # ========= A. Read your cancer-type grouping =========
 # Expect a 2-column TSV: cohort, group
@@ -311,6 +315,7 @@ write_tsv(cnv_precise, file = "~/githubRepo/KZFP_review/outputs/cnv_freq_Num_sam
 
 # ========= E. Merge results and run enrichment tests =========
 mut_freq <- read_tsv("~/githubRepo/KZFP_review/outputs/mut_freq_Num_sampleLevel.tsv")
+cnv_precise <- read_tsv("~/githubRepo/KZFP_review/outputs/cnv_freq_Num_sampleLevel.tsv")
 
 # Combine: your grouping + mutation frequencies + precise CNV (and optional ANY CNV)
 freq_by_cancer <- group_df %>%
@@ -328,6 +333,7 @@ freq_by_cancer <- group_df %>%
 readr::write_tsv(freq_by_cancer, "~/githubRepo/KZFP_review/outputs/mut_cnv_freq_by_cancerTypes.tsv")
 
 freq_by_cancer <- read_tsv("~/githubRepo/KZFP_review/outputs/mut_cnv_freq_by_cancerTypes.tsv")
+
 
 # One-sided Fisher on cancer-type–level frequencies:
 # Convert frequencies back to counts via round(freq * n) and compare group A vs B.
@@ -348,14 +354,116 @@ targets_mut <- c("tp53_mut_freq","ifn_mut_freq")
 targets_cnv <- c("tp53_loss_freq","tp53_amp_freq","ifn_loss_freq","ifn_amp_freq")
 
 res_mut <- tibble(metric = targets_mut) %>%
-  rowwise() %>% mutate(p = fisher_one_sided(freq_by_cancer, metric, "greater")) %>%
+  rowwise() %>% mutate(p = fisher_one_sided(tbl = freq_by_cancer, col_freq = metric, alt = "greater")) %>%
   ungroup() %>% mutate(p_adj = p.adjust(p, method="BH"))
-readr::write_tsv(res_mut, "enrichment_results_mut.tsv")
+readr::write_tsv(res_mut, "~/githubRepo/KZFP_review/outputs/enrichment_results_mut.tsv")
 
 res_cnv <- tibble(metric = targets_cnv) %>%
   rowwise() %>% mutate(p = fisher_one_sided(freq_by_cancer, metric, "greater")) %>%
   ungroup() %>% mutate(p_adj = p.adjust(p, method="BH"))
-readr::write_tsv(res_cnv, "enrichment_results_cnv.tsv")
+readr::write_tsv(res_cnv, "~/githubRepo/KZFP_review/outputs/enrichment_results_cnv.tsv")
+
+
+# plot
+
+# res_mut and res_cnv: two tibbles: metric, p, p_adj
+res_mut <- res_mut %>% mutate(type = "Mutation")
+res_cnv <- res_cnv %>% mutate(type = "CNV")
+
+df <- bind_rows(res_mut, res_cnv) %>%
+  mutate(
+    group = if_else(str_detect(metric, regex("^tp53", ignore_case = TRUE)), "TP53", "IFN"),
+    # 从 metric 中抽出事件（amp/loss/mut 之类），可按你需要修改
+    event = metric %>%
+      str_replace(regex("^(tp53|ifn)_", ignore_case = TRUE), "") %>%
+      str_replace("_freq$", "") %>%
+      str_replace_all("_", " "),
+    score = -log10(p_adj),
+    score_cap = pmin(score, 50),                 # 把极小的 FDR 上限封顶，避免轴太夸张
+    fdr_lab = scientific(p_adj, digits = 2)      # 科学计数法标签
+  )
+
+# FDR cutoff:
+thr <- c(0.05)
+thr_x <- -log10(thr)
+thr_lab <- paste0("FDR=", thr)
+
+new_names <- c("ifn_amp_freq" = "IFN amp. freq.",
+               "ifn_loss_freq" = "IFN loss freq.",
+               "ifn_mut_freq" = "IFN mut. freq.",
+               "tp53_amp_freq" = "TP53 amp. freq.",
+               "tp53_loss_freq" = "TP53 loss freq.",
+               "tp53_mut_freq" = "TP53 mut. freq.")
+
+p_bar <- ggplot(
+  df,
+  aes(x = score_cap, y = fct_reorder(metric, score_cap), fill = group)
+) +
+  geom_col(width = 0.6) +
+  geom_vline(xintercept = thr_x, linetype = "dashed", linewidth = 0.5, alpha = 0.6,
+             color = "blue") +
+  geom_text(aes(label = fdr_lab), hjust = -0.05, size = 3) +
+  facet_grid(type ~ ., scales = "free_y", space = "free_y") +
+  scale_x_continuous("−log10(FDR)", expand = expansion(mult = c(0.02, 0.15))) +
+  scale_y_discrete(labels = new_names)+
+  ylab(NULL) +
+  ggpubr::theme_pubr(base_size = 12) +
+  annotate("text",
+           x = thr_x + 0.5, y = Inf, label = thr_lab,
+           hjust = 0, vjust = 1.4, size = 3.2, fontface = "bold",
+           color = "blue") +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.text.y = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+# save image
+ggsave("~/githubRepo/KZFP_review/outputs/SNP_CNV_enrichment_barplot.pdf", 
+       plot = p_bar, width = 18, height = 9, units = "cm")
+
+
+# ## optional：只显示每个分面(type)里最显著的 Top N
+# TopN <- 10   # 想全显就设 NA 或把下面这段注释掉
+
+# df0 <- bind_rows(res_mut, res_cnv) %>%
+#   mutate(
+#     group = if_else(str_detect(metric, regex("^tp53", TRUE)), "TP53", "IFN"),
+#     score = -log10(p_adj),
+#     score_cap = pmin(score, 50),                     # 极端值封顶
+#     fdr_lab = scientific(p_adj, digits = 2),
+#     metric_wrapped = str_wrap(metric, width = 25)    # 长标签换行
+#   )
+
+# df <- df0 %>%
+#   group_by(type) %>%
+#   slice_max(order_by = score, n = TopN, with_ties = FALSE) %>%
+#   ungroup()
+# 
+# p_bar <- ggplot(
+#   df,
+#   aes(x = score_cap, y = fct_reorder(metric_wrapped, score_cap), fill = group)
+# ) +
+#   geom_col(width = 0.65) +
+#   geom_vline(xintercept = thr_x, linetype = "dashed", linewidth = 0.3, alpha = 0.6) +
+#   geom_text(aes(label = fdr_lab), hjust = -0.05, size = 3, color = "grey20") +
+#   facet_grid(type ~ ., scales = "free_y", space = "free_y") +
+#   scale_x_continuous("−log10(FDR)", expand = expansion(mult = c(0.02, 0.15))) +
+#   ylab(NULL) +
+#   scale_fill_manual(values = c("TP53" = "#4C78A8", "IFN" = "#E45756")) +  # 可改色
+#   guides(fill = guide_legend(title = NULL)) +
+#   theme_minimal(base_size = 12) +
+#   theme(
+#     panel.grid.major.y = element_blank(),
+#     panel.grid.minor = element_blank(),
+#     strip.text.y = element_text(face = "bold"),
+#     legend.position = "right"
+#   )
+
+
+
+
 
 
 # ========= F. Optional: pathway-level mutation enrichment (Hallmark as example) =========
@@ -412,3 +520,5 @@ test_pathways_mut <- function(){
 
 path_mut <- test_pathways_mut()
 readr::write_tsv(path_mut, "pathway_enrichment_mut.tsv")
+
+
