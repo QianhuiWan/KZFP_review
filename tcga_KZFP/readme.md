@@ -15,3 +15,18 @@
 
 - step 1: get mutation data and CNV data
 ~/githubRepo/KZFP_review/tcga_KZFP/TCGA_mutationCNA_enrichemnt_R3.R
+
+
+**Notes** 
+- TCGA data location: 
+  - RNAseq counts: /net/nfs-irwrsrchnas01/labs/dschones/bioresearch/qianhui/pub_data/TCGA_data/TCGA_rnaseq
+  - SNV maf: /net/nfs-irwrsrchnas01/labs/dschones/bioresearch/qianhui/pub_data/TCGA_data/TCGA_snv
+  - CNV segment: /net/nfs-irwrsrchnas01/labs/dschones/bioresearch/qianhui/pub_data/TCGA_data/TCGA_cnv
+
+
+
+- File transfer command:
+```
+rsync -avP /Users/qwan/GDCdata qwan@apollo-acc.coh.org:/net/nfs-irwrsrchnas01/labs/dschones/bioresearch/qianhui/pub_data/TCGA_data/
+
+```
