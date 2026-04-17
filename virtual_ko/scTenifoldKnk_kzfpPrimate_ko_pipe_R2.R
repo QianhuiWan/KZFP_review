@@ -1,10 +1,15 @@
 # ============================================================
-# Paper-level scTenifoldKnk pipeline
-# multiple genes + 5x repeated downsampling + stable hit summary
+# scTenifoldKnk pipeline
+# multiple genes + fixed repeat design + stable hit summary
 # normal Epi vs tumor EpiT
 # ============================================================
+# All KO genes were evaluated using the same repeated (5 repeats) subsampling (n=3000 cells per group)
+# design for normal and tumor epithelial cells, ensuring that 
+# between-gene differences were not driven by inconsistent cell selection across runs.
 
+.libPaths("/home/qwan/R/Rstudio-WithModules-WithJupyter.4.4.1.sif/libs")
 suppressPackageStartupMessages({
+  library(tidyverse)
   library(Matrix)
   library(data.table)
   library(stringr)
@@ -17,22 +22,30 @@ suppressPackageStartupMessages({
 # ============================================================
 # 0. user settings
 # ============================================================
-expr_dir <- "expression/5fbf5a26771a5b0db8fe7a8b"
-cluster_file <- "cluster/crc10x_tSNE_cl_global.tsv"
+input_dir <- "/net/nfs-irwrsrchnas01/labs/dschones/bioresearch/qianhui/projects/kzfp/colon_singleCell/SCP1162"
+expr_dir <- paste0(input_dir, "/expression/5fbf5a26771a5b0db8fe7a8b")
+cluster_file <- paste0(input_dir, "/cluster/crc10x_tSNE_cl_global.tsv")
 
-gene_col_in_genes_file <- 1
+gene_col_in_genes_file <- 2
+
+## all KZFPs
+human_KZFPs_age_R2 <- read_tsv(file = "/net/nfs-irwrsrchnas01/labs/dschones/bioresearch/qianhui/hg38_2024/KZFPs/KZFP_evolutional_age_R2.tsv")
+## primate-specific KZFPs
+primate_specific_KZFPs_R2 <- read_tsv(file = "/net/nfs-irwrsrchnas01/labs/dschones/bioresearch/qianhui/hg38_2024/KZFPs/KZFP_evolutional_primate_specific_R2.tsv")
 
 # >>> multiple KO genes here <<<
-gKO_genes <- c("G10", "GENE2", "GENE3")
+# gKO_genes <- c("ZNF141", "ZNF382", "ZNF93")
+# gKO_genes <- c("ZNF93")
+gKO_genes <- primate_specific_KZFPs_R2$assigned_gene
 
-outdir <- "paper_scTenifoldKnk_multiKO"
+outdir <- "/net/nfs-irwrsrchnas01/labs/dschones/bioresearch/qianhui/projects/kzfp/ko_output/scTenifoldKnk_multiKO_fixedDesign_primateKZFP"
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 # repeated downsampling design
 n_repeats <- 5
 n_cells_normal <- 3000
 n_cells_tumor  <- 3000
-base_seed <- 12345
+base_seed <- 12355
 
 # gene filtering
 min_cells_expr <- 10
@@ -50,11 +63,12 @@ nc_q         <- 0.05
 td_K         <- 3
 td_maxIter   <- 100
 td_maxError  <- 1e-5
-ma_k         <- 30
+ma_nDim         <- 2
 
 # stable hit thresholds
 stable_freq_cutoff <- 0.6
 top_n_per_run      <- 300
+
 
 # ============================================================
 # 1. helper functions
@@ -144,7 +158,7 @@ extract_rank_table <- function(res_obj, top_n = 300) {
 run_one_knk <- function(mat_sparse, gKO_gene, seed, group_name, repeat_id,
                         qc_minLSize, qc_minCells, nc_lambda, nc_nNet, nc_nCells,
                         nc_nComp, nc_scaleScores, nc_symmetric, nc_q,
-                        td_K, td_maxIter, td_maxError, ma_k, top_n_per_run, gene_outdir) {
+                        td_K, td_maxIter, td_maxError, ma_nDim, top_n_per_run, gene_outdir) {
   
   message("\n==============================")
   message("Gene: ", gKO_gene, " | Group: ", group_name, " | Repeat: ", repeat_id)
@@ -175,7 +189,7 @@ run_one_knk <- function(mat_sparse, gKO_gene, seed, group_name, repeat_id,
     td_K = td_K,
     td_maxIter = td_maxIter,
     td_maxError = td_maxError,
-    ma_k = ma_k
+    ma_nDim = ma_nDim
   )
   
   saveRDS(
@@ -262,20 +276,166 @@ make_comparison_table <- function(stable_summary_one_gene) {
     arrange(desc(abs(freq_diff)), desc(abs(abs_score_diff)))
 }
 
-run_one_gene_pipeline <- function(gKO_gene, mat, normal_cells_all, tumor_cells_all, outdir,
-                                  n_repeats, n_cells_normal, n_cells_tumor, base_seed,
-                                  min_cells_expr, qc_minLSize, qc_minCells, nc_lambda,
-                                  nc_nNet, nc_nCells, nc_nComp, nc_scaleScores,
-                                  nc_symmetric, nc_q, td_K, td_maxIter, td_maxError,
-                                  ma_k, top_n_per_run, stable_freq_cutoff) {
+# ============================================================
+# 2. read input
+# ============================================================
+message("Reading matrix...")
+mat <- Matrix::readMM(file.path(expr_dir, "matrix.mtx.gz"))
+
+message("Reading genes...")
+genes <- data.table::fread(file.path(expr_dir, "matrix.genes.tsv"), header = FALSE)
+
+message("Reading barcodes...")
+barcodes <- data.table::fread(file.path(expr_dir, "matrix.barcodes.tsv"), header = FALSE)
+
+rownames(mat) <- make.unique(as.character(genes[[gene_col_in_genes_file]]))
+colnames(mat) <- as.character(barcodes[[1]])
+
+message("Matrix loaded: ", nrow(mat), " genes x ", ncol(mat), " cells")
+
+message("Reading cluster annotation...")
+cl <- data.table::fread(cluster_file, header = TRUE)
+
+if (nrow(cl) >= 1 && cl$NAME[1] == "TYPE") {
+  cl <- cl[-1, ]
+} else if (nrow(cl) >= 2 && cl$NAME[2] == "TYPE") {
+  cl <- cl[-2, ]
+}
+
+cl$barcode <- extract_barcode(cl$NAME)
+
+# ============================================================
+# 3. define groups once
+# ============================================================
+normal_epi <- cl %>%
+  filter(ClusterMidway == "Epi")
+
+tumor_epit <- cl %>%
+  filter(ClusterMidway == "EpiT")
+
+normal_cells_all <- intersect(unique(normal_epi$NAME), colnames(mat))
+tumor_cells_all  <- intersect(unique(tumor_epit$NAME), colnames(mat))
+
+message("Matched cells:")
+message("  normal Epi = ", length(normal_cells_all))
+message("  tumor EpiT = ", length(tumor_cells_all))
+
+if (length(normal_cells_all) == 0) stop("No matched normal Epi cells.")
+if (length(tumor_cells_all) == 0) stop("No matched tumor EpiT cells.")
+
+# ============================================================
+# 4. fixed repeat design
+# ============================================================
+message("\nBuilding fixed repeat design ...")
+
+repeat_designs <- vector("list", n_repeats)
+
+for (i in seq_len(n_repeats)) {
+  normal_cells_use <- downsample_cells(
+    normal_cells_all,
+    n_target = n_cells_normal,
+    seed = base_seed + i
+  )
   
+  tumor_cells_use <- downsample_cells(
+    tumor_cells_all,
+    n_target = n_cells_tumor,
+    seed = base_seed + 1000 + i
+  )
+  
+  repeat_designs[[i]] <- list(
+    repeat_id = i,
+    normal_cells = normal_cells_use,
+    tumor_cells  = tumor_cells_use
+  )
+  
+  fwrite(
+    data.frame(barcode = normal_cells_use),
+    file = file.path(outdir, paste0("repeat", i, "_normal_Epi_cells.tsv")),
+    sep = "\t"
+  )
+  
+  fwrite(
+    data.frame(barcode = tumor_cells_use),
+    file = file.path(outdir, paste0("repeat", i, "_tumor_EpiT_cells.tsv")),
+    sep = "\t"
+  )
+}
+
+# save simple summary
+repeat_design_summary <- bind_rows(lapply(repeat_designs, function(x) {
+  tibble(
+    repeat_id = x$repeat_id,
+    n_normal_cells = length(x$normal_cells),
+    n_tumor_cells  = length(x$tumor_cells)
+  )
+}))
+fwrite(
+  repeat_design_summary,
+  file = file.path(outdir, "fixed_repeat_design_summary.tsv"),
+  sep = "\t"
+)
+
+# ============================================================
+# 5. precompute matrices for each repeat design
+# ============================================================
+message("\nPrecomputing matrices for fixed repeat design ...")
+
+repeat_mats <- vector("list", n_repeats)
+
+for (i in seq_len(n_repeats)) {
+  normal_cells_use <- repeat_designs[[i]]$normal_cells
+  tumor_cells_use  <- repeat_designs[[i]]$tumor_cells
+  
+  mat_normal <- mat[, normal_cells_use, drop = FALSE]
+  mat_tumor  <- mat[, tumor_cells_use,  drop = FALSE]
+  
+  mat_normal <- filter_genes_sparse(mat_normal, min_cells_expr = min_cells_expr)
+  mat_tumor  <- filter_genes_sparse(mat_tumor,  min_cells_expr = min_cells_expr)
+  
+  shared_genes <- intersect(rownames(mat_normal), rownames(mat_tumor))
+  mat_normal <- mat_normal[shared_genes, , drop = FALSE]
+  mat_tumor  <- mat_tumor[shared_genes,  , drop = FALSE]
+  
+  repeat_mats[[i]] <- list(
+    repeat_id = i,
+    mat_normal = mat_normal,
+    mat_tumor  = mat_tumor,
+    shared_genes = shared_genes
+  )
+  
+  repeat_info <- tibble(
+    repeat_id = i,
+    group = c("normal_Epi", "tumor_EpiT"),
+    n_cells = c(ncol(mat_normal), ncol(mat_tumor)),
+    n_genes = c(nrow(mat_normal), nrow(mat_tumor)),
+    est_dense_gb = c(
+      estimate_dense_gb(nrow(mat_normal), ncol(mat_normal)),
+      estimate_dense_gb(nrow(mat_tumor), ncol(mat_tumor))
+    )
+  )
+  
+  fwrite(
+    repeat_info,
+    file = file.path(outdir, paste0("repeat", i, "_matrix_design.tsv")),
+    sep = "\t"
+  )
+}
+
+# ============================================================
+# 6. run all KO genes using fixed repeat design
+# ============================================================
+all_gene_summaries <- list()
+all_gene_comparisons <- list()
+
+for (gKO_gene in gKO_genes) {
   message("\n#############################################")
   message("Starting KO gene: ", gKO_gene)
   message("#############################################")
   
   if (!(gKO_gene %in% rownames(mat))) {
     warning("Skipping ", gKO_gene, ": not found in expression matrix.")
-    return(NULL)
+    next
   }
   
   gene_outdir <- file.path(outdir, gKO_gene)
@@ -286,50 +446,15 @@ run_one_gene_pipeline <- function(gKO_gene, mat, normal_cells_all, tumor_cells_a
   for (i in seq_len(n_repeats)) {
     message("\nRepeat ", i, " / ", n_repeats, " for ", gKO_gene)
     
-    normal_cells_use <- downsample_cells(
-      normal_cells_all,
-      n_target = n_cells_normal,
-      seed = base_seed + i
-    )
-    
-    tumor_cells_use <- downsample_cells(
-      tumor_cells_all,
-      n_target = n_cells_tumor,
-      seed = base_seed + 1000 + i
-    )
-    
-    mat_normal <- mat[, normal_cells_use, drop = FALSE]
-    mat_tumor  <- mat[, tumor_cells_use,  drop = FALSE]
-    
-    mat_normal <- filter_genes_sparse(mat_normal, min_cells_expr = min_cells_expr)
-    mat_tumor  <- filter_genes_sparse(mat_tumor,  min_cells_expr = min_cells_expr)
-    
-    shared_genes <- intersect(rownames(mat_normal), rownames(mat_tumor))
-    mat_normal <- mat_normal[shared_genes, , drop = FALSE]
-    mat_tumor  <- mat_tumor[shared_genes,  , drop = FALSE]
+    mat_normal <- repeat_mats[[i]]$mat_normal
+    mat_tumor  <- repeat_mats[[i]]$mat_tumor
+    shared_genes <- repeat_mats[[i]]$shared_genes
     
     if (!(gKO_gene %in% shared_genes)) {
       warning("Skipping repeat ", i, " for ", gKO_gene,
-              ": gene dropped after filtering.")
+              ": gene not retained after filtering in this repeat.")
       next
     }
-    
-    repeat_info <- tibble(
-      KO_gene = gKO_gene,
-      repeat_id = i,
-      group = c("normal_Epi", "tumor_EpiT"),
-      n_cells = c(ncol(mat_normal), ncol(mat_tumor)),
-      n_genes = c(nrow(mat_normal), nrow(mat_tumor)),
-      est_dense_gb = c(
-        estimate_dense_gb(nrow(mat_normal), ncol(mat_normal)),
-        estimate_dense_gb(nrow(mat_tumor), ncol(mat_tumor))
-      )
-    )
-    fwrite(
-      repeat_info,
-      file = file.path(gene_outdir, paste0("repeat", i, "_design.tsv")),
-      sep = "\t"
-    )
     
     rank_normal <- run_one_knk(
       mat_sparse = mat_normal,
@@ -349,7 +474,7 @@ run_one_gene_pipeline <- function(gKO_gene, mat, normal_cells_all, tumor_cells_a
       td_K = td_K,
       td_maxIter = td_maxIter,
       td_maxError = td_maxError,
-      ma_k = ma_k,
+      ma_nDim = ma_nDim,
       top_n_per_run = top_n_per_run,
       gene_outdir = gene_outdir
     )
@@ -372,7 +497,7 @@ run_one_gene_pipeline <- function(gKO_gene, mat, normal_cells_all, tumor_cells_a
       td_K = td_K,
       td_maxIter = td_maxIter,
       td_maxError = td_maxError,
-      ma_k = ma_k,
+      ma_nDim = ma_nDim,
       top_n_per_run = top_n_per_run,
       gene_outdir = gene_outdir
     )
@@ -383,7 +508,7 @@ run_one_gene_pipeline <- function(gKO_gene, mat, normal_cells_all, tumor_cells_a
   
   if (length(all_rank_tables) == 0) {
     warning("No successful runs for ", gKO_gene)
-    return(NULL)
+    next
   }
   
   rank_all <- bind_rows(all_rank_tables)
@@ -435,111 +560,12 @@ run_one_gene_pipeline <- function(gKO_gene, mat, normal_cells_all, tumor_cells_a
     sep = "\t"
   )
   
-  return(list(
-    rank_all = rank_all,
-    stable_summary = stable_summary,
-    comparison_table = comparison_table
-  ))
+  all_gene_summaries[[gKO_gene]] <- stable_summary
+  all_gene_comparisons[[gKO_gene]] <- comparison_table
 }
 
 # ============================================================
-# 2. read input
-# ============================================================
-message("Reading matrix...")
-mat <- Matrix::readMM(file.path(expr_dir, "matrix.mtx.gz"))
-
-message("Reading genes...")
-genes <- data.table::fread(file.path(expr_dir, "matrix.genes.tsv"), header = FALSE)
-
-message("Reading barcodes...")
-barcodes <- data.table::fread(file.path(expr_dir, "matrix.barcodes.tsv"), header = FALSE)
-
-rownames(mat) <- make.unique(as.character(genes[[gene_col_in_genes_file]]))
-colnames(mat) <- as.character(barcodes[[1]])
-
-message("Matrix loaded: ", nrow(mat), " genes x ", ncol(mat), " cells")
-
-message("Reading cluster annotation...")
-cl <- data.table::fread(cluster_file, header = TRUE)
-
-if (nrow(cl) >= 1 && cl$NAME[1] == "TYPE") {
-  cl <- cl[-1, ]
-} else if (nrow(cl) >= 2 && cl$NAME[2] == "TYPE") {
-  cl <- cl[-2, ]
-}
-
-cl$barcode <- extract_barcode(cl$NAME)
-
-# ============================================================
-# 3. define groups once
-# ============================================================
-normal_epi <- cl %>%
-  filter(ClusterMidway == "Epi", !grepl("^Tumor", ClusterFull))
-
-tumor_epit <- cl %>%
-  filter(ClusterMidway == "EpiT" | grepl("^Tumor", ClusterFull))
-
-normal_cells_all <- intersect(unique(normal_epi$barcode), colnames(mat))
-tumor_cells_all  <- intersect(unique(tumor_epit$barcode), colnames(mat))
-
-message("Matched cells:")
-message("  normal Epi = ", length(normal_cells_all))
-message("  tumor EpiT = ", length(tumor_cells_all))
-
-if (length(normal_cells_all) == 0) stop("No matched normal Epi cells.")
-if (length(tumor_cells_all) == 0) stop("No matched tumor EpiT cells.")
-
-# ============================================================
-# 4. run all KO genes
-# ============================================================
-all_gene_summaries <- list()
-all_gene_comparisons <- list()
-
-for (g in gKO_genes) {
-  res_g <- tryCatch(
-    {
-      run_one_gene_pipeline(
-        gKO_gene = g,
-        mat = mat,
-        normal_cells_all = normal_cells_all,
-        tumor_cells_all = tumor_cells_all,
-        outdir = outdir,
-        n_repeats = n_repeats,
-        n_cells_normal = n_cells_normal,
-        n_cells_tumor = n_cells_tumor,
-        base_seed = base_seed,
-        min_cells_expr = min_cells_expr,
-        qc_minLSize = qc_minLSize,
-        qc_minCells = qc_minCells,
-        nc_lambda = nc_lambda,
-        nc_nNet = nc_nNet,
-        nc_nCells = nc_nCells,
-        nc_nComp = nc_nComp,
-        nc_scaleScores = nc_scaleScores,
-        nc_symmetric = nc_symmetric,
-        nc_q = nc_q,
-        td_K = td_K,
-        td_maxIter = td_maxIter,
-        td_maxError = td_maxError,
-        ma_k = ma_k,
-        top_n_per_run = top_n_per_run,
-        stable_freq_cutoff = stable_freq_cutoff
-      )
-    },
-    error = function(e) {
-      warning("Failed for ", g, ": ", e$message)
-      return(NULL)
-    }
-  )
-  
-  if (!is.null(res_g)) {
-    all_gene_summaries[[g]]   <- res_g$stable_summary
-    all_gene_comparisons[[g]] <- res_g$comparison_table
-  }
-}
-
-# ============================================================
-# 5. combine all genes
+# 7. combine all genes
 # ============================================================
 if (length(all_gene_summaries) > 0) {
   stable_summary_all <- bind_rows(all_gene_summaries)
